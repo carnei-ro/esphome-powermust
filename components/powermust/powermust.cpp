@@ -133,53 +133,73 @@ void Powermust::loop() {
   }
 
   if (this->state_ == STATE_POLL_CHECKED) {
-    const char *tmp = reinterpret_cast<char *>(this->read_buffer_);
+    char *tmp = reinterpret_cast<char *>(this->read_buffer_);
     switch (this->used_polling_commands_[this->last_polling_command_].identifier) {
-      case POLLING_Q1:
+      case POLLING_Q1: {
         ESP_LOGD(TAG, "Decode Q1");
         // (232.9 232.9 232.9 003 49.9 13.4 25.0 00001000\r
         // (005.2 232.4 226.8 002 50.1 12.9 25.0 10001000\r
         //                                 1  2  3  4  5  6  7  8
-        {
-          char *p = const_cast<char *>(tmp) + 1;  // skip '('
-          value_grid_voltage_ = strtof(p, &p);
-          value_grid_fault_voltage_ = strtof(p, &p);
-          value_ac_output_voltage_ = strtof(p, &p);
-          value_ac_output_load_percent_ = strtol(p, &p, 10);
-          value_grid_frequency_ = strtof(p, &p);
-          value_battery_voltage_ = strtof(p, &p);
-          value_temperature_ = strtof(p, &p);
-          while (*p == ' ')
-            p++;
-          value_utility_fail_ = *p++ - '0';
-          value_battery_low_ = *p++ - '0';
-          value_bypass_active_ = *p++ - '0';
-          value_ups_failed_ = *p++ - '0';
-          value_ups_type_standby_ = *p++ - '0';
-          value_test_in_progress_ = *p++ - '0';
-          value_shutdown_active_ = *p++ - '0';
-          value_beeper_on_ = *p - '0';
+        char *start = strchr(tmp, '(');
+        if (start == nullptr) {
+          ESP_LOGD(TAG, "Q1 response has no '(' marker: %s", tmp);
+          this->state_ = STATE_IDLE;
+          break;
         }
+        char *p = start + 1;  // skip '('
+        value_grid_voltage_ = strtof(p, &p);
+        value_grid_fault_voltage_ = strtof(p, &p);
+        value_ac_output_voltage_ = strtof(p, &p);
+        value_ac_output_load_percent_ = strtol(p, &p, 10);
+        value_grid_frequency_ = strtof(p, &p);
+        value_battery_voltage_ = strtof(p, &p);
+        value_temperature_ = strtof(p, &p);
+        while (*p == ' ')
+          p++;
+        char *flags_start = p;
+        if (strlen(flags_start) < 8) {
+          ESP_LOGD(TAG, "Q1 response has incomplete flags: %s", flags_start);
+          this->state_ = STATE_IDLE;
+          break;
+        }
+        value_utility_fail_ = *p++ - '0';
+        value_battery_low_ = *p++ - '0';
+        value_bypass_active_ = *p++ - '0';
+        value_ups_failed_ = *p++ - '0';
+        value_ups_type_standby_ = *p++ - '0';
+        value_test_in_progress_ = *p++ - '0';
+        value_shutdown_active_ = *p++ - '0';
+        value_beeper_on_ = *p - '0';
         if (this->last_q1_) {
-          this->last_q1_->publish_state(tmp);
+          this->last_q1_->publish_state(start);
+        }
+        if (this->flags_) {
+          this->flags_->publish_state(std::string(flags_start, 8));
         }
         this->state_ = STATE_POLL_DECODED;
         break;
-      case POLLING_F:
+      }
+      case POLLING_F: {
         ESP_LOGD(TAG, "Decode F");
         // "#220.0 003 12.00 50.0\r"
-        {
-          char *p = const_cast<char *>(tmp) + 1;  // skip '#'
-          value_ac_output_rating_voltage_ = strtof(p, &p);
-          value_ac_output_rating_current_ = strtol(p, &p, 10);
-          value_battery_rating_voltage_ = strtof(p, &p);
-          value_ac_output_rating_frequency_ = strtof(p, &p);
+        char *start = strchr(tmp, '#');
+        if (start == nullptr) {
+          ESP_LOGD(TAG, "F response has no '#' marker: %s", tmp);
+          this->state_ = STATE_IDLE;
+          break;
         }
+        char *p = start + 1;  // skip '#'
+        value_ac_output_rating_voltage_ = strtof(p, &p);
+        // Some firmwares report the current as "003" and others as "3.0".
+        value_ac_output_rating_current_ = strtof(p, &p);
+        value_battery_rating_voltage_ = strtof(p, &p);
+        value_ac_output_rating_frequency_ = strtof(p, &p);
         if (this->last_f_) {
-          this->last_f_->publish_state(tmp);
+          this->last_f_->publish_state(start);
         }
         this->state_ = STATE_POLL_DECODED;
         break;
+      }
       default:
         this->state_ = STATE_IDLE;
         break;
@@ -202,15 +222,15 @@ void Powermust::loop() {
       uint8_t byte;
       this->read_byte(&byte);
 
-      if (this->read_pos_ == POWERMUST_READ_BUFFER_LENGTH) {
+      if (this->read_pos_ >= POWERMUST_READ_BUFFER_LENGTH - 1) {
         this->read_pos_ = 0;
         this->empty_uart_buffer_();
       }
       this->read_buffer_[this->read_pos_] = byte;
       this->read_pos_++;
 
-      // end of answer
-      if (byte == 0x0D) {
+      // end of answer (CR, LF or CRLF)
+      if (byte == 0x0D || byte == 0x0A) {
         this->read_buffer_[this->read_pos_] = 0;
         this->empty_uart_buffer_();
         if (this->state_ == STATE_POLL) {
@@ -259,10 +279,12 @@ uint8_t Powermust::send_next_command_() {
     this->command_start_millis_ = millis();
     this->empty_uart_buffer_();
     this->read_pos_ = 0;
+    this->write_str(this->command_prefix_.c_str());
     this->write_str(command);
-    // end Byte
-    this->write(0x0D);
-    ESP_LOGD(TAG, "Sending command from queue: %s with length %d", command, length);
+    // end Bytes
+    this->write_str(this->command_terminator_.c_str());
+    ESP_LOGD(TAG, "Sending command from queue: %s with prefix length %u and terminator length %u",
+             command, this->command_prefix_.length(), this->command_terminator_.length());
     return 1;
   }
   return 0;
@@ -281,13 +303,14 @@ void Powermust::send_next_poll_() {
   this->command_start_millis_ = millis();
   this->empty_uart_buffer_();
   this->read_pos_ = 0;
+  this->write_str(this->command_prefix_.c_str());
   this->write_array(this->used_polling_commands_[this->last_polling_command_].command,
                     this->used_polling_commands_[this->last_polling_command_].length);
-  // end Byte
-  this->write(0x0D);
-  ESP_LOGD(TAG, "Sending polling command : %s with length %d",
+  // end Bytes
+  this->write_str(this->command_terminator_.c_str());
+  ESP_LOGD(TAG, "Sending polling command : %s with prefix length %u and terminator length %u",
            this->used_polling_commands_[this->last_polling_command_].command,
-           this->used_polling_commands_[this->last_polling_command_].length);
+           this->command_prefix_.length(), this->command_terminator_.length());
 }
 
 void Powermust::queue_command_(const char *command, uint8_t length) {
@@ -310,6 +333,8 @@ void Powermust::switch_command(const std::string &command) {
 }
 void Powermust::dump_config() {
   ESP_LOGCONFIG(TAG, "Powermust:");
+  ESP_LOGCONFIG(TAG, "Command prefix length: %u", this->command_prefix_.length());
+  ESP_LOGCONFIG(TAG, "Command terminator length: %u", this->command_terminator_.length());
   ESP_LOGCONFIG(TAG, "used commands:");
   for (auto &used_polling_command : this->used_polling_commands_) {
     if (used_polling_command.length != 0) {
@@ -339,6 +364,7 @@ void Powermust::dump_config() {
   LOG_BINARY_SENSOR("", "Beeper On", this->beeper_on_);
 
   LOG_TEXT_SENSOR("", "Last Q1", this->last_q1_);
+  LOG_TEXT_SENSOR("", "Flags", this->flags_);
   LOG_TEXT_SENSOR("", "Last F", this->last_f_);
 }
 void Powermust::update() {}

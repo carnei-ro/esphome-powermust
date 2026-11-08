@@ -165,4 +165,13 @@ TEST_F(PowermustFDecodeTest, AcOutputRatingFrequency) {
   EXPECT_NEAR(ac_output_rating_frequency_.state, 50.0f, 0.05f);
 }
 
+TEST_F(PowermustFDecodeTest, DecimalCurrentXnb720Bi) {
+  // Real Intelbras XNB 720 BI response.
+  ups_.decode_and_publish(POLLING_F, "#120.0 3.0 12.00 60.0\r");
+  EXPECT_NEAR(ac_output_rating_voltage_.state, 120.0f, 0.05f);
+  EXPECT_FLOAT_EQ(ac_output_rating_current_.state, 3.0f);
+  EXPECT_NEAR(battery_rating_voltage_.state, 12.0f, 0.05f);
+  EXPECT_NEAR(ac_output_rating_frequency_.state, 60.0f, 0.05f);
+}
+
 }  // namespace esphome::powermust::testing

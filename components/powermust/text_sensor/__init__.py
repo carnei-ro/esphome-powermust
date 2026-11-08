@@ -8,10 +8,12 @@ DEPENDENCIES = ["uart"]
 CODEOWNERS = ["@syssi"]
 
 CONF_LAST_Q1 = "last_q1"
+CONF_FLAGS = "flags"
 CONF_LAST_F = "last_f"
 
 TYPES = [
     CONF_LAST_Q1,
+    CONF_FLAGS,
     CONF_LAST_F,
 ]
 

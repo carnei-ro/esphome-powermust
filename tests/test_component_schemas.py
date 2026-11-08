@@ -36,8 +36,9 @@ class TestSensorTypes:
 class TestTextSensorTypes:
     def test_types_list_completeness(self):
         assert text_sensor.CONF_LAST_Q1 in text_sensor.TYPES
+        assert text_sensor.CONF_FLAGS in text_sensor.TYPES
         assert text_sensor.CONF_LAST_F in text_sensor.TYPES
-        assert len(text_sensor.TYPES) == 2
+        assert len(text_sensor.TYPES) == 3
 
 
 class TestSwitchTypes:

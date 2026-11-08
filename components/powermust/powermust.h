@@ -69,14 +69,17 @@ class Powermust : public uart::UARTDevice, public PollingComponent {
 
   // F
   POWERMUST_SENSOR(ac_output_rating_voltage, F, float)
-  POWERMUST_SENSOR(ac_output_rating_current, F, int)
+  POWERMUST_SENSOR(ac_output_rating_current, F, float)
   POWERMUST_SENSOR(battery_rating_voltage, F, float)
   POWERMUST_SENSOR(ac_output_rating_frequency, F, float)
 
   POWERMUST_TEXT_SENSOR(last_q1, Q1)
+  POWERMUST_TEXT_SENSOR(flags, Q1)
   POWERMUST_TEXT_SENSOR(last_f, F)
 
   void switch_command(const std::string &command);
+  void set_command_terminator(const std::string &terminator) { this->command_terminator_ = terminator; }
+  void set_command_prefix(const std::string &prefix) { this->command_prefix_ = prefix; }
   void setup() override;
   void loop() override;
   void dump_config() override;
@@ -95,6 +98,8 @@ class Powermust : public uart::UARTDevice, public PollingComponent {
   void send_next_poll_();
   void queue_command_(const char *command, uint8_t length);
   std::string command_queue_[COMMAND_QUEUE_LENGTH];
+  std::string command_prefix_{""};
+  std::string command_terminator_{"\r"};
   uint8_t command_queue_position_ = 0;
   uint8_t read_buffer_[POWERMUST_READ_BUFFER_LENGTH];
   size_t read_pos_{0};

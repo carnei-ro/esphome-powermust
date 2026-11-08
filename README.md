@@ -11,6 +11,7 @@ ESPHome component to monitor and control a Mustek PowerMust 800 UPS via RS232
 ## Supported devices
 
 * Mustek PowerMust 800 USB
+* Intelbras XNB 720 BI (Board **BX500-1500 SMT**. Megatec Q1 over the internal UPS UART)
 
 ## Untested devices
 
@@ -90,6 +91,54 @@ EOF
 esphome run esp32-example.yaml
 
 ```
+
+## Local usage with an Intelbras XNB 720 BI / NodeMCU
+
+This checkout can also talk to the UPS UART directly (5 V TTL through a
+TXS0102 level shifter), without an RS232 transceiver. The XNB 720 BI ignores
+the first command sent with an idle line: it needs a blank CR before each
+command. After that warm-up it answers to both CR and CRLF:
+
+```yaml
+external_components:
+  - source:
+      type: local
+      path: esphome-powermust/components
+
+uart:
+  id: ups_uart
+  tx_pin: GPIO14   # D5
+  rx_pin: GPIO12   # D6
+  baud_rate: 2400
+
+powermust:
+  - id: ups
+    uart_id: ups_uart
+    update_interval: 5s
+    # Blank CR sent before every polling/control command.
+    command_prefix: "\r"
+    command_terminator: "\r\n"
+```
+
+`command_prefix` defaults to `""` (no prefix) and `command_terminator`
+defaults to `"\r"` (Megatec standard). The component accepts responses
+terminated by CR, LF or CRLF and ignores noise before the `(` marker of a Q1
+response.
+
+The F response of the XNB 720 BI uses a decimal current (`#120.0 3.0 12.00
+60.0`), which the component handles since the rating current sensor is a
+float.
+
+GPIO14/GPIO12 use SoftwareSerial on the ESP8266, so UART0 stays available
+for the USB log:
+
+```yaml
+logger:
+  baud_rate: 115200
+```
+
+If UART0 (GPIO1/GPIO3) is used for the UPS instead, set `baud_rate: 0` on
+the logger because both would share the same serial pins.
 
 ## Example response all sensors enabled
 
